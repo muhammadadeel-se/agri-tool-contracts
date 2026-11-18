@@ -1,27 +1,26 @@
-# Agricultural Agentic Loop & Tool Integration
+# Agricultural Safety Guardrails & Refusal Handling
 
-A multi-turn LLM advisory agent that translates natural language farmer questions into schema-validated weather and soil nutrition tool calls, executes local Python functions, and synthesizes grounded responses.
+A multi-layered safety guardrail system wrapping an agricultural tool-calling agent to sanitize inputs, enforce agronomy domain boundaries, block hazardous chemical or dosage queries, and log security triggers.
 
-## Architecture & Execution Loop
+## Boundary Rules & Guardrail Layers
 
-1. **System Prompting (`SYSTEM_PROMPT`):** Instructs the model to ground all metrics in tool outputs, ask clarifying questions when required inputs (5-digit ZIP code or N-P-K ppm values) are missing, and link context across turns.
-2. **Dynamic Tool Routing (`AgriAdvisorAgent.run_turn`):** Sends conversation history and `TOOL_SCHEMAS` from `agri_tools.py` to an OpenAI-compatible chat completions endpoint (`tool_choice="auto"`).
-3. **Contract-Validated Execution (`_safe_execute_tool`):** Parses model JSON payloads, enforces JSON Schema input rules via `execute_tool_call`, and appends structured `role: "tool"` messages back into the conversation history.
-4. **Fallback & Loop Safety:**
-   - Malformed JSON (`invalid_json_arguments`), schema violations (`schema_validation_error`), and unregistered tool names (`unknown_tool`) are caught and returned to the model as structured JSON error objects with recovery hints rather than crashing the process.
-   - A `max_iterations` guard prevents infinite tool-calling loops, and `_trim_history` bounds context length without splitting assistant/tool message pairs.
+1. **Permitted Agricultural Scope (`PERMITTED_TOPICS`):**
+   - Local simulated weather, wind, humidity, and soil moisture lookups (5-digit US ZIP code).
+   - Standard N-P-K fertilizer recommendations for supported crops (`corn`, `wheat`, `soybean`, `tomato`, `potato`).
+   - Soil pH evaluation and standard lime/sulfur amendments.
+2. **Pre-LLM Sanitization & Classification (`SafetyGuardrail.evaluate_input`):**
+   - **Sanitization:** Normalizes Unicode (`NFKC`), strips ASCII control characters, collapses whitespace, and enforces a 1,000-character length ceiling.
+   - **Prompt Injection Defense:** Blocks system-prompt extraction, rule-override attempts, and jailbreak personas before reaching the LLM.
+   - **Hazardous Chemical & Dosage Filtering:** Blocks fuel-fertilizer explosive mixtures (e.g., ammonium nitrate + diesel), toxic gas combinations (bleach + ammonia), restricted poisons, and extreme fertilizer overdoses.
+   - **Domain Boundary & Nonsensical Input Gate:** Politely declines non-agricultural requests (finance, coding, human medicine, politics) and non-linguistic gibberish without wasting LLM tokens.
+3. **Post-Tool Dosage Guardrail (`SafetyGuardrail.validate_fertilizer_dosage`):**
+   - Enforces upper agronomic ceilings (`350 lbs/acre N`, `250 lbs/acre P2O5`, `400 lbs/acre K2O`, and `10,000 acres`) on computed tool outputs before they reach the farmer.
+4. **Structured Security Audit Logging (`SecurityAuditLogger`):**
+   - Appends JSON-formatted events (`timestamp_utc`, `stage`, `category`, `trigger`, `sanitized_preview`) to `guardrail_events.log` whenever an input or tool output is blocked.
 
-## Setup & Testing
+## Setup & Running Tests
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # Add your OPENAI_API_KEY (or local OPENAI_BASE_URL)
-
-# Run automated unit tests (uses mocked LLM responses; no API key required)
 pytest -v
-
-# Run scripted 3-turn weather + crop nutrition demo
-python cli.py --demo
-
-# Start an interactive multi-turn farmer session
-python cli.py
+```
